@@ -45,27 +45,38 @@ object WebSearch {
     data class SearchResult(val title: String, val url: String, val snippet: String)
 
     /**
-     * Search across multiple topic buckets, combine results, filter generic headlines,
-     * and enrich the top results with real article content.
+     * Search across DuckDuckGo (primary, ranked higher) and Google News RSS (secondary)
+     * in parallel, combine results, filter generic headlines, and enrich the top results
+     * with real article content via Jina AI Reader.
+     *
+     * DuckDuckGo is used as the primary source because it covers both news and general
+     * information, while Google News RSS provides additional news-specific coverage.
      */
     suspend fun search(query: String, max: Int = 5): List<SearchResult> = withContext(Dispatchers.IO) {
-        // 1. Search with the user's actual prompt + supplement with topic queries if results are thin
-        val userResults = searchGoogleNews(query, max)
-        val allResults = if (userResults.size >= 3) {
-            // User prompt returned enough results — use them
-            Log.i(TAG, "User prompt returned ${userResults.size} results")
-            userResults
+        // 1. Run both sources in parallel
+        val (ddgResults, rssResults) = coroutineScope {
+            val ddgDeferred = async { searchDuckDuckGo(query, max) }
+            val rssDeferred = async { searchGoogleNews(query, max) }
+            ddgDeferred.await() to rssDeferred.await()
+        }
+        Log.i(TAG, "DDG returned ${ddgResults.size}, RSS returned ${rssResults.size} for \"$query\"")
+
+        // 2. DDG ranks higher — put it first, then RSS for news coverage
+        val combined = ddgResults + rssResults
+
+        // 3. If combined results are thin, supplement with RSS fallback topics
+        val allResults = if (combined.size >= 3) {
+            combined
         } else {
-            // Thin results — supplement with topic queries
-            Log.i(TAG, "User prompt returned ${userResults.size} results; supplementing with topics")
+            Log.i(TAG, "Thin results (${combined.size}); supplementing with topic queries")
             val topicResults = coroutineScope {
                 fallbackTopics.map { q ->
                     async { searchGoogleNews(q, 3) }
                 }.awaitAll().flatten()
             }
-            userResults + topicResults
+            combined + topicResults
         }
-        Log.i(TAG, "Google News RSS returned ${allResults.size} total results")
+        Log.i(TAG, "Combined total: ${allResults.size} results")
 
         if (allResults.isNotEmpty()) {
             val filtered = filterGenericHeadlines(allResults)
@@ -74,19 +85,12 @@ object WebSearch {
             val deduped = deduplicate(filtered)
             Log.i(TAG, "after dedup: ${deduped.size} results")
             val top = deduped.take(max)
-            // Enrich via Jina AI directly on the Google News URLs
+            // Enrich via Jina AI Reader for real article content
             val enriched = enrichWithJina(top)
             return@withContext enriched
         }
 
-        // 2. DuckDuckGo fallback (for non-news queries)
-        val ddg = searchDuckDuckGo(query, max)
-        if (ddg.isNotEmpty()) {
-            val filtered = filterGenericHeadlines(ddg)
-            val enriched = enrichWithJina(filtered)
-            return@withContext enriched
-        }
-        // 3. Wikipedia last resort
+        // 4. Wikipedia last resort
         searchWikipedia(query, max)
     }
 

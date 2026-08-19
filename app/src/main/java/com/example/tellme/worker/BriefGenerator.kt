@@ -67,46 +67,60 @@ object BriefGenerator {
 
         NotificationHelper.updateWork(context, "TellMe", "Loading model & writing your brief…")
 
-        // 3. Load model once, use for both passes
-        Log.i(TAG, "PHASE: load model")
-        val llm = runCatching {
+        // 3. We create a SEPARATE model instance for each pass so the LLM's conversation
+        //    context is fresh — MediaPipe's generateResponse() accumulates KV-cache history
+        //    between calls on the same instance, which would pollute Pass 2 with Pass 1's
+        //    tool-call system prompt and response.
+
+        // Pass 1: Ask LLM which APIs to call (own instance, own context)
+        Log.i(TAG, "PHASE: pass 1 - decide API calls")
+        val toolCalls = runCatching {
+            val llmTool = OnDeviceModel.createInstance(context, modelState.path, maxTokens = 1024)
+            try {
+                val toolPrompt = buildToolCallPrompt(schedule.prompt)
+                val toolResponse = llmTool.generateResponse(toolPrompt)
+                Log.i(TAG, "pass 1 response: ${toolResponse.take(200)}")
+                ApiClient.parseToolCalls(toolResponse)
+            } finally {
+                llmTool.close()
+                Log.i(TAG, "pass 1 model unloaded")
+            }
+        }.getOrElse { e ->
+            Log.e(TAG, "pass 1 failed", e)
+            emptyList()
+        }
+        Log.i(TAG, "parsed ${toolCalls.size} tool calls: $toolCalls")
+
+        // Call the APIs the LLM requested
+        NotificationHelper.updateWork(context, "TellMe", "Fetching live data…")
+        val apiResults = mutableListOf<String>()
+        for ((apiName, args) in toolCalls) {
+            val data = runCatching {
+                withTimeout(10_000) { ApiClient.call(apiName, args) }
+            }.getOrDefault("")
+            if (data.isNotBlank()) {
+                apiResults.add(data)
+                Log.i(TAG, "API $apiName: ${data.take(100)}")
+            }
+        }
+        val apiData = apiResults.joinToString("\n")
+        Log.i(TAG, "total API data chars=${apiData.length}")
+
+        // Pass 2: Generate the final brief (fresh instance = fresh context)
+        Log.i(TAG, "PHASE: pass 2 - generate brief")
+        val llmBrief = runCatching {
             OnDeviceModel.createInstance(context, modelState.path, maxTokens = 1024)
         }.getOrElse { e ->
-            Log.e(TAG, "model load failed", e)
+            Log.e(TAG, "model load failed for pass 2", e)
             storeAndMaybePost(context, schedule, trigger, schedule.title.ifBlank { "TellMe" }, "Model load failed: ${e.message}")
             NotificationHelper.dismissWork(context)
             return
         }
 
         try {
-            // Pass 1: Ask LLM which APIs to call
-            Log.i(TAG, "PHASE: pass 1 - decide API calls")
-            val toolPrompt = buildToolCallPrompt(schedule.prompt)
-            val toolResponse = runCatching { llm.generateResponse(toolPrompt) }.getOrDefault("")
-            Log.i(TAG, "pass 1 response: ${toolResponse.take(200)}")
-            val toolCalls = ApiClient.parseToolCalls(toolResponse)
-            Log.i(TAG, "parsed ${toolCalls.size} tool calls: $toolCalls")
-
-            // Call the APIs the LLM requested
-            NotificationHelper.updateWork(context, "TellMe", "Fetching live data…")
-            val apiResults = mutableListOf<String>()
-            for ((apiName, args) in toolCalls) {
-                val data = runCatching {
-                    withTimeout(10_000) { ApiClient.call(apiName, args) }
-                }.getOrDefault("")
-                if (data.isNotBlank()) {
-                    apiResults.add(data)
-                    Log.i(TAG, "API $apiName: ${data.take(100)}")
-                }
-            }
-            val apiData = apiResults.joinToString("\n")
-            Log.i(TAG, "total API data chars=${apiData.length}")
-
-            // Pass 2: Generate the final brief
-            Log.i(TAG, "PHASE: pass 2 - generate brief")
             val prompt = buildBriefPrompt(schedule.prompt, results, apiData)
             Log.i(TAG, "prompt built chars=${prompt.length}")
-            val brief = runCatching { cleanup(llm.generateResponse(prompt)) }.getOrElse { e ->
+            val brief = runCatching { cleanup(llmBrief.generateResponse(prompt)) }.getOrElse { e ->
                 Log.e(TAG, "generation failed", e)
                 "Couldn't generate a brief: ${e.message}"
             }
@@ -125,8 +139,8 @@ object BriefGenerator {
             NotificationStore.saveSources(schedule.id, trigger, sources)
             storeAndMaybePost(context, schedule, trigger, schedule.title.ifBlank { "TellMe" }, brief)
         } finally {
-            llm.close()
-            Log.i(TAG, "model unloaded")
+            llmBrief.close()
+            Log.i(TAG, "pass 2 model unloaded")
         }
 
         NotificationHelper.updateWork(context, "TellMe", "Brief ready — saving…")
@@ -151,18 +165,9 @@ object BriefGenerator {
         body: String,
     ) {
         NotificationStore.saveBrief(schedule.id, trigger, title, body)
-        // If we're at/after the exact time, the PostReceiver may have already fired; post now so
-        // the user still receives the (final) brief. Same notification id => no duplicates.
-        if (System.currentTimeMillis() >= trigger) {
-            com.example.tellme.NotificationHelper.showBrief(
-                context,
-                briefNotificationId(schedule.id),
-                title,
-                body,
-                scheduleId = schedule.id,
-                triggerMillis = trigger,
-            )
-        }
+        // Do NOT post the notification here — PostReceiver handles all brief notifications.
+        // Posting from both storeAndMaybePost and PostReceiver caused duplicate notifications
+        // because both use the same notification id but fire from different components.
     }
 
     /** Pass 1: Ask the LLM which API tools to call for this query. */
