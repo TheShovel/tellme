@@ -1,5 +1,10 @@
 # TellMe
 
+<img src="https://img.shields.io/github/stars/TheShovel/tellme?style=flat-square&logo=github" alt="Stars">
+<img src="https://img.shields.io/github/languages/top/TheShovel/tellme?style=flat-square&logo=kotlin&label=language" alt="Language">
+<img src="https://img.shields.io/github/license/TheShovel/tellme?style=flat-square" alt="License">
+<img src="https://img.shields.io/github/last-commit/TheShovel/tellme?style=flat-square&logo=git" alt="Last Commit">
+
 An Android app that gives you scheduled daily briefings powered by an on-device AI.
 
 ## What it does
