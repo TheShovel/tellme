@@ -1,0 +1,6 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.TellMe" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#fff8f8fc</item>
+        <item name="android:navigationBarColor">#fff8f8fc</item>
+    </style>
+</resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Debug-only exported receiver so `am broadcast` can force the pipeline during development.
+         This file is merged ONLY into debug builds; release builds stay locked down. -->
+    <application>
+        <receiver
+            android:name=".debug.ForceTestReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" />
+    </application>
+</manifest>

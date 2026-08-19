@@ -1,0 +1,37 @@
+# Built outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+app/build/
+build/
+
+# Gradle
+.gradle/
+local.properties
+gradle-app.setting
+!gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Signing
+*.jks
+*.keystore
+app/release.keystore
+
+# Debug
+*.hprof

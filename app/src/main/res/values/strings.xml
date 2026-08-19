@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">TellMe</string>
+    <string name="channel_briefs_name">Daily Briefs</string>
+    <string name="channel_briefs_desc">Briefs generated from web searches on your schedule.</string>
+    <string name="channel_work_name">Background Work</string>
+    <string name="channel_work_desc">Status of model loading and brief generation.</string>
+</resources>
